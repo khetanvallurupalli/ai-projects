@@ -1,0 +1,6 @@
+name: pulumi-state-backend
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: S3 bucket for Pulumi state backend (multi-account)

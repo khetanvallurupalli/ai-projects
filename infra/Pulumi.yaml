@@ -1,0 +1,6 @@
+name: eks-kuma-cfk
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: EKS cluster with Kuma service mesh and Confluent for Kubernetes

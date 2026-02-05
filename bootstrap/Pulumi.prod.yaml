@@ -1,0 +1,5 @@
+config:
+  aws:region: us-east-1
+  pulumi-state-backend:environment: prod
+  pulumi-state-backend:devAccountId: "111111111111"
+  pulumi-state-backend:prodAccountId: "222222222222"

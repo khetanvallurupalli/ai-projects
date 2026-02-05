@@ -1,0 +1,26 @@
+config:
+  aws:region: us-east-1
+  eks-kuma-cfk:environment: dev
+  eks-kuma-cfk:vpcId: vpc-0123456789abcdef0
+  eks-kuma-cfk:publicSubnetIds:
+    - subnet-0aaa000000000000a
+    - subnet-0bbb000000000000b
+    - subnet-0ccc000000000000c
+  eks-kuma-cfk:privateSubnetIds:
+    - subnet-0ddd000000000000d
+    - subnet-0eee000000000000e
+    - subnet-0fff000000000000f
+  eks-kuma-cfk:eksClusterName: eks-dev
+  eks-kuma-cfk:eksVersion: "1.29"
+  eks-kuma-cfk:nodeInstanceTypes:
+    - t3.large
+  eks-kuma-cfk:nodeDesiredSize: "2"
+  eks-kuma-cfk:nodeMinSize: "1"
+  eks-kuma-cfk:nodeMaxSize: "5"
+  eks-kuma-cfk:eksPublicAccess: "true"
+  eks-kuma-cfk:kumaVersion: "2.9.1"
+  eks-kuma-cfk:cfkVersion: "0.1033.3"
+  eks-kuma-cfk:confluentCloudBootstrap: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
+  # Set secrets with: pulumi config set --secret confluentCloudApiKey <value>
+  # eks-kuma-cfk:confluentCloudApiKey:
+  # eks-kuma-cfk:confluentCloudApiSecret:
