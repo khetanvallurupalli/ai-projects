@@ -1,216 +1,238 @@
 # Kuma Orchestration
 
-Pulumi (Python) project that deploys comprehensive Kuma service mesh policies on an existing EKS cluster provisioned by the `infra/` project. Includes multi-zone federation, full policy suite (traffic, security, resilience, observability), and Prometheus/Jaeger stack.
+Production-ready Pulumi (Python) project for deploying Kuma service mesh with multi-cluster support, cross-cluster mTLS, and comprehensive policy management.
 
-## Prerequisites
+## Features
+
+- **Multi-Cluster Support**: EKS, AKS, AKS Local (on-premises), GKE, K3s, KIND
+- **Cross-Cluster mTLS**: Automatic certificate management with rotation
+- **Locality-Aware Load Balancing**: Prefer local zone, failover to remote
+- **Complete Policy Suite**: Traffic routing, permissions, rate limiting, circuit breaker, resilience
+- **Observability Stack**: Prometheus + Jaeger/Datadog integration
+- **Zero-Trust Networking**: Deny by default in production
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           Multi-Cluster Kuma Federation                          │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────────┐                      ┌─────────────────────┐           │
+│  │   EKS Cluster       │                      │   AKS Cluster       │           │
+│  │   (Global CP)       │◄────── KDS ─────────►│   (Zone CP)         │           │
+│  │                     │      (mTLS)          │                     │           │
+│  │  ┌───────────────┐  │                      │  ┌───────────────┐  │           │
+│  │  │ Global CP     │  │                      │  │ Zone CP       │  │           │
+│  │  │ - Mesh        │  │                      │  │ - Zone Ingress│  │           │
+│  │  │ - Policies    │  │                      │  │ - Zone Egress │  │           │
+│  │  │ - CA          │  │                      │  │ - Local Proxy │  │           │
+│  │  └───────────────┘  │                      │  └───────────────┘  │           │
+│  │         │           │                      │         │           │           │
+│  │  ┌──────▼────────┐  │                      │  ┌──────▼────────┐  │           │
+│  │  │ Zone Ingress  │◄─┼──────────────────────┼──│ Zone Egress   │  │           │
+│  │  │ Zone Egress   │──┼──────────────────────┼─►│ Zone Ingress  │  │           │
+│  │  └───────────────┘  │                      │  └───────────────┘  │           │
+│  │         │           │                      │         │           │           │
+│  │  ┌──────▼────────┐  │                      │  ┌──────▼────────┐  │           │
+│  │  │  App Pods     │  │                      │  │  App Pods     │  │           │
+│  │  │  + Sidecar    │◄─┼─────── mTLS ─────────┼─►│  + Sidecar    │  │           │
+│  │  └───────────────┘  │                      │  └───────────────┘  │           │
+│  └─────────────────────┘                      └─────────────────────┘           │
+│                                                                                  │
+│  ┌─────────────────────┐                      ┌─────────────────────┐           │
+│  │   AKS Local         │                      │   GKE Cluster       │           │
+│  │   (On-Premises)     │◄────── KDS ─────────►│   (Zone CP)         │           │
+│  │                     │                      │                     │           │
+│  └─────────────────────┘                      └─────────────────────┘           │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Quick Start
+
+### Prerequisites
 
 - Pulumi CLI installed
 - Python 3.8+
-- `infra/` stack deployed (provides EKS cluster)
-- AWS credentials configured
+- kubectl configured
+- Cloud credentials (AWS/Azure/GCP)
+
+### Single Cluster Deployment
+
+```bash
+cd kuma-orchestration
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+pulumi login s3://<bucket-name>
+pulumi stack init dev
+
+# Simple single-cluster config
+pulumi config set kuma-orchestration:infraStackName organization/infra/dev
+
+pulumi up --stack dev
+```
+
+### Multi-Cluster Deployment
+
+See [MULTI_CLUSTER.md](./MULTI_CLUSTER.md) for detailed multi-cluster setup.
+
+```bash
+# Deploy to each cluster
+for cluster in eks-dev aks-dev; do
+  pulumi config set cluster:currentCluster $cluster
+  pulumi up --yes
+done
+```
 
 ## Project Structure
 
 ```
 kuma-orchestration/
-├── Pulumi.yaml                    # Project definition
-├── Pulumi.dev.yaml                # Dev stack config
-├── Pulumi.prod.yaml               # Prod stack config
-├── requirements.txt               # Python dependencies
-├── __main__.py                    # Entrypoint - wires all components
-├── config.py                      # Typed dataclass config loader
-├── README.md                      # This file
+├── Pulumi.yaml                     # Project definition
+├── Pulumi.dev.yaml                 # Dev stack (multi-cluster example)
+├── Pulumi.prod.yaml                # Prod stack (multi-region)
+├── requirements.txt                # Python dependencies
+├── config.py                       # Multi-cluster config loader
+├── __main__.py                     # Main entrypoint
+├── README.md                       # This file
+├── MULTI_CLUSTER.md                # Multi-cluster guide
 └── components/
-    ├── __init__.py                # Public re-exports
-    ├── cluster_ref.py             # Stack reference to read EKS outputs
-    ├── kuma_global_cp.py          # Global control plane (Helm) + Mesh CRD
-    ├── kuma_zone_cp.py            # Zone control plane for multi-zone
-    ├── zone_resources.py          # ZoneIngress + ZoneEgress
-    ├── traffic_routing.py         # MeshHTTPRoute + MeshTCPRoute
-    ├── traffic_permissions.py     # MeshTrafficPermission
-    ├── rate_limit.py              # MeshRateLimit
-    ├── circuit_breaker.py         # MeshCircuitBreaker
-    ├── resilience.py              # MeshRetry + MeshTimeout
-    ├── fault_injection.py         # MeshFaultInjection (dev only)
-    ├── observability.py           # MeshAccessLog + MeshMetric + MeshTrace
-    └── observability_stack.py     # Prometheus + Jaeger Helm releases
-```
-
-## Commands
-
-```bash
-# Setup
-cd kuma-orchestration
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-pip install -r requirements.txt
-
-# Login to Pulumi state backend
-pulumi login s3://<bucket-name>
-
-# Initialize stack
-pulumi stack init dev
-
-# Preview changes
-pulumi preview --stack dev
-
-# Deploy
-pulumi up --stack dev
-
-# Deploy to production
-pulumi up --stack prod
+    ├── __init__.py                 # Public exports
+    ├── cluster_ref.py              # Legacy single-cluster reference
+    ├── cluster_providers.py        # Multi-cluster provider factory
+    ├── kuma_global_cp.py           # Global control plane
+    ├── kuma_zone_cp.py             # Zone control plane
+    ├── zone_resources.py           # ZoneIngress/Egress
+    ├── cross_cluster_policies.py   # Cross-cluster mTLS + policies
+    ├── traffic_routing.py          # MeshHTTPRoute/TCPRoute
+    ├── traffic_permissions.py      # MeshTrafficPermission
+    ├── rate_limit.py               # MeshRateLimit
+    ├── circuit_breaker.py          # MeshCircuitBreaker
+    ├── resilience.py               # MeshTimeout/Retry
+    ├── fault_injection.py          # MeshFaultInjection
+    ├── observability.py            # AccessLog/Metric/Trace
+    └── observability_stack.py      # Prometheus + Jaeger
 ```
 
 ## Configuration Reference
 
-| Config Key | Type | Default | Description |
-|------------|------|---------|-------------|
-| `infraStackName` | string | required | Stack reference to infra project |
-| `kuma:version` | string | 2.6.0 | Kuma version |
-| `kuma:mode` | string | zone | Control plane mode (zone/global) |
-| `kuma:namespace` | string | kuma-system | Kuma namespace |
-| `kuma:zoneName` | string | {env}-zone | Zone name |
-| `kuma:meshName` | string | default | Mesh name |
-| `kuma:mtlsEnabled` | bool | true | Enable mTLS |
-| `kuma:httpRequestTimeout` | int | 15 | HTTP timeout (seconds) |
-| `kuma:retryAttempts` | int | 3 | Retry attempts |
-| `kuma:rateLimitRps` | int | 100 | Rate limit RPS |
+### Cluster Configuration
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `cluster:currentCluster` | string | Active cluster for this deployment |
+| `cluster:clusters` | list | List of cluster configurations |
+| `cluster:clusters[].name` | string | Unique cluster identifier |
+| `cluster:clusters[].type` | enum | eks, aks, aks-local, gke, k3s, kind |
+| `cluster:clusters[].zoneName` | string | Kuma zone name |
+| `cluster:clusters[].region` | string | Cloud region |
+| `cluster:clusters[].infraStackName` | string | Pulumi stack for kubeconfig |
+| `cluster:clusters[].isGlobalCpCluster` | bool | Hosts global control plane |
+
+### Cross-Cluster Configuration
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `crossCluster:enabled` | bool | true | Enable multi-cluster |
+| `crossCluster:mtlsMode` | string | strict | mTLS mode (strict/permissive) |
+| `crossCluster:caBackend` | string | builtin | CA backend (builtin/vault) |
+| `crossCluster:localityAwareLb` | bool | true | Prefer local zone |
+| `crossCluster:crossZoneTrafficDefault` | string | Allow | Default cross-zone action |
+
+### Policy Configuration
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `kuma:trafficPermissionDefault` | string | Allow | Default traffic permission |
+| `kuma:rateLimitRps` | int | 100 | Rate limit per service |
 | `kuma:circuitBreakerMaxConnections` | int | 512 | Max connections |
-| `kuma:tracingBackend` | string | jaeger | Tracing backend (jaeger/datadog) |
-| `kuma:traceSampleRate` | float | 0.5 | Trace sample rate (0-1) |
-| `kuma:faultInjectionEnabled` | bool | true | Enable fault injection |
-| `kuma:trafficPermissionDefault` | string | Allow | Default permission (Allow/Deny) |
-| `kuma:managedServices` | list | [] | Services to apply policies to |
+| `kuma:httpRequestTimeout` | int | 15 | HTTP timeout (seconds) |
+| `kuma:retryAttempts` | int | 3 | Retry count |
+
+## Supported Cluster Types
+
+| Type | Value | Description |
+|------|-------|-------------|
+| Amazon EKS | `eks` | AWS managed Kubernetes |
+| Azure AKS | `aks` | Azure managed Kubernetes |
+| AKS Local | `aks-local` | Azure Arc-enabled on-premises |
+| Google GKE | `gke` | GCP managed Kubernetes |
+| K3s | `k3s` | Lightweight Kubernetes |
+| KIND | `kind` | Kubernetes in Docker (dev) |
+| OpenShift | `openshift` | Red Hat OpenShift |
+| Rancher | `rancher` | Rancher managed clusters |
 
 ## Dev vs Prod Differences
 
 | Setting | Dev | Prod |
 |---------|-----|------|
+| Global CP replicas | 1 | 3 |
 | Traffic permission default | Allow | Deny |
+| Cross-zone traffic default | Allow | Deny |
 | Fault injection | Enabled | Disabled |
 | Trace sample rate | 50% | 1% |
 | Tracing backend | Jaeger | Datadog |
-| HTTP timeout | 30s | 15s |
 | Rate limit RPS | 100 | 1000 |
 | Circuit breaker max | 512 | 4096 |
-| Jaeger storage | In-memory | Elasticsearch |
-
-## Dependency Graph
-
-```
-ClusterReference
-       │
-       ▼
-KumaControlPlane ──────► ObservabilityStack
-       │
-       ▼
-ZoneResources
-       │
-       ├──► TrafficRouting
-       ├──► TrafficPermissions
-       ├──► RateLimiting
-       ├──► CircuitBreaker
-       ├──► Resilience
-       └──► FaultInjection
-                 │
-                 ▼
-       ObservabilityPolicies
-```
-
-## Adding a New Service
-
-1. Add the service name to `kuma:managedServices` in the stack config:
-
-```yaml
-kuma:managedServices:
-  - frontend
-  - backend
-  - api-gateway
-  - my-new-service  # Add here
-```
-
-2. Run `pulumi up` - all policies will be applied to the new service.
-
-## Adding Custom Policies
-
-Create a new component in `components/` following the pattern:
-
-```python
-from typing import Optional
-import pulumi_kubernetes as k8s
-from pulumi import ComponentResource, ResourceOptions
-from config import KumaConfig
-
-class MyCustomPolicy(ComponentResource):
-    def __init__(
-        self,
-        name: str,
-        config: KumaConfig,
-        k8s_provider: k8s.Provider,
-        opts: Optional[ResourceOptions] = None,
-    ):
-        super().__init__("kuma:orchestration:MyCustomPolicy", name, None, opts)
-
-        # Create your CRDs here
-        self.policy = k8s.apiextensions.CustomResource(
-            f"{name}-my-policy",
-            api_version="kuma.io/v1alpha1",
-            kind="MyPolicyKind",
-            metadata=k8s.meta.v1.ObjectMetaArgs(
-                name="my-policy",
-                namespace=config.kuma_namespace,
-            ),
-            spec={
-                # Policy spec
-            },
-            opts=ResourceOptions(parent=self, provider=k8s_provider),
-        )
-
-        self.register_outputs({"policy_name": self.policy.metadata.name})
-```
-
-Then wire it in `__main__.py`.
-
-## API Version Reference
-
-| CRD | API Version |
-|-----|-------------|
-| Mesh, ZoneIngress, ZoneEgress | `kuma.io/v1alpha1` |
-| MeshTrafficPermission, MeshRateLimit, MeshCircuitBreaker | `kuma.io/v1alpha1` |
-| MeshFaultInjection, MeshAccessLog, MeshMetric, MeshTrace | `kuma.io/v1alpha1` |
-| MeshHTTPRoute, MeshTCPRoute, MeshTimeout, MeshRetry | `kuma.io/v2alpha1` |
 
 ## Verification
 
-After deployment, verify resources:
-
 ```bash
-# Check Mesh
+# Check Kuma installation
+kubectl get pods -n kuma-system
 kubectl get mesh -A
+
+# Check zone connectivity (multi-cluster)
+kubectl get zones -n kuma-system
 
 # Check policies
 kubectl get meshtrafficpermission,meshratelimit,meshcircuitbreaker -n kuma-system
 
-# Check observability
-kubectl get pods -n observability
+# Check cross-cluster services
+kubectl get dataplanes -n kuma-system -o wide
 
-# Check Kuma CP pods
-kubectl get pods -n kuma-system
-
-# Check zone resources
-kubectl get zoneingress,zoneegress -n kuma-system
+# Test cross-cluster call
+kubectl exec -n app deployment/client -- curl http://backend.app.svc.cluster.local
 ```
 
 ## Troubleshooting
 
-**Stack reference not found:**
-Ensure the `infraStackName` matches your infra project stack (e.g., `organization/infra/dev`).
+### Zone not connecting to Global CP
 
-**Helm release stuck:**
-Check if the namespace exists and Helm can connect to the cluster.
+1. Check KDS connectivity:
+```bash
+kubectl logs -n kuma-system deployment/kuma-control-plane | grep -i kds
+```
 
-**CRD not created:**
-Ensure Kuma control plane is running before policies are applied (dependency chain).
+2. Verify global address:
+```bash
+kubectl get svc -n kuma-system kuma-global-zone-sync
+```
 
-**Tracing not working:**
-Verify Jaeger/Datadog pods are running in the observability namespace.
+3. Check certificates:
+```bash
+kubectl get secrets -n kuma-system | grep tls
+```
+
+### Cross-cluster traffic failing
+
+1. Check ZoneIngress/Egress:
+```bash
+kubectl get zoneingress,zoneegress -n kuma-system
+```
+
+2. Verify traffic permissions:
+```bash
+kubectl get meshtrafficpermission -n kuma-system -o yaml
+```
+
+3. Check mTLS status:
+```bash
+kubectl get mesh default -o yaml | grep -A10 mtls
+```
+
+## License
+
+MIT

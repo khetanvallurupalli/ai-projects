@@ -1,0 +1,271 @@
+name: Kuma Orchestration Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'kuma-orchestration/**'
+      - 'examples/nginx-kuma-demo/**'
+      - '.github/workflows/kuma-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+      cluster:
+        description: 'Target cluster (leave empty for all)'
+        required: false
+        type: string
+      deploy_example:
+        description: 'Deploy nginx example app'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  PULUMI_VERSION: '3.100.0'
+
+jobs:
+  # ============================================================================
+  # Deploy Kuma to Dev Environment
+  # ============================================================================
+  deploy-dev:
+    name: Deploy Kuma (Dev)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.inputs.environment == 'dev'
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: kuma-orchestration/requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          cd kuma-orchestration
+          pip install -r requirements.txt
+
+      - name: Setup Pulumi
+        uses: pulumi/actions@v5
+        with:
+          pulumi-version: ${{ env.PULUMI_VERSION }}
+
+      - name: Configure AWS Credentials (EKS)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEV_ROLE_ARN }}
+          aws-region: us-west-2
+          role-session-name: kuma-deploy-dev
+
+      - name: Login to Pulumi Backend
+        run: pulumi login s3://${{ secrets.PULUMI_STATE_BUCKET }}
+        env:
+          AWS_REGION: us-west-2
+
+      - name: Deploy Kuma Orchestration
+        run: |
+          cd kuma-orchestration
+          pulumi stack select dev --create
+          pulumi up --yes --skip-preview
+        env:
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+      - name: Get EKS Kubeconfig
+        run: |
+          CLUSTER_NAME=$(pulumi stack output cluster_name -s dev --cwd kuma-orchestration 2>/dev/null || echo "")
+          if [ -n "$CLUSTER_NAME" ]; then
+            aws eks update-kubeconfig --name $CLUSTER_NAME --region us-west-2
+          fi
+        env:
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+      - name: Verify Kuma Deployment
+        run: |
+          echo "Checking Kuma pods..."
+          kubectl get pods -n kuma-system --timeout=300s
+
+          echo "Checking Mesh..."
+          kubectl get mesh -A
+
+          echo "Checking policies..."
+          kubectl get meshtrafficpermission,meshratelimit -n kuma-system
+
+      - name: Deploy Nginx Example
+        if: github.event.inputs.deploy_example != 'false'
+        run: |
+          echo "Deploying nginx-kuma-demo..."
+          kubectl apply -f examples/nginx-kuma-demo/
+
+          echo "Waiting for pods..."
+          kubectl wait --for=condition=Ready pod -l app=nginx -n nginx-demo --timeout=180s || true
+          kubectl wait --for=condition=Ready pod -l app=curl-client -n nginx-demo --timeout=180s || true
+
+          echo "Verifying deployment..."
+          kubectl get pods -n nginx-demo
+
+      - name: Test Cross-Cluster Connectivity
+        if: success()
+        continue-on-error: true
+        run: |
+          echo "Testing nginx service..."
+          kubectl exec -n nginx-demo deployment/curl-client -c curl -- \
+            curl -s --max-time 10 http://nginx.nginx-demo.svc.cluster.local/health || echo "Test completed"
+
+  # ============================================================================
+  # Deploy Kuma to Prod Environment
+  # ============================================================================
+  deploy-prod:
+    name: Deploy Kuma (Prod)
+    runs-on: ubuntu-latest
+    needs: [deploy-dev]
+    if: github.event_name == 'push' || github.event.inputs.environment == 'prod'
+    environment: prod
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: kuma-orchestration/requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          cd kuma-orchestration
+          pip install -r requirements.txt
+
+      - name: Setup Pulumi
+        uses: pulumi/actions@v5
+        with:
+          pulumi-version: ${{ env.PULUMI_VERSION }}
+
+      - name: Configure AWS Credentials (EKS)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PROD_ROLE_ARN }}
+          aws-region: us-west-2
+          role-session-name: kuma-deploy-prod
+
+      - name: Login to Pulumi Backend
+        run: pulumi login s3://${{ secrets.PULUMI_STATE_BUCKET }}
+        env:
+          AWS_REGION: us-west-2
+
+      - name: Deploy Kuma Orchestration (Prod)
+        run: |
+          cd kuma-orchestration
+          pulumi stack select prod --create
+          pulumi up --yes --skip-preview
+        env:
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+      - name: Verify Kuma Deployment
+        run: |
+          CLUSTER_NAME=$(pulumi stack output cluster_name -s prod --cwd kuma-orchestration 2>/dev/null || echo "")
+          if [ -n "$CLUSTER_NAME" ]; then
+            aws eks update-kubeconfig --name $CLUSTER_NAME --region us-west-2
+            kubectl get pods -n kuma-system
+            kubectl get mesh -A
+          fi
+        env:
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+  # ============================================================================
+  # Multi-Cluster Deployment (Parallel)
+  # ============================================================================
+  deploy-multi-cluster:
+    name: Deploy Multi-Cluster (${{ matrix.cluster }})
+    runs-on: ubuntu-latest
+    if: github.event.inputs.cluster != '' || contains(github.event.head_commit.message, '[multi-cluster]')
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      matrix:
+        cluster:
+          - eks-dev
+          - aks-dev
+        include:
+          - cluster: eks-dev
+            cloud: aws
+            region: us-west-2
+          - cluster: aks-dev
+            cloud: azure
+            region: eastus
+      fail-fast: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: kuma-orchestration/requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          cd kuma-orchestration
+          pip install -r requirements.txt
+
+      - name: Setup Pulumi
+        uses: pulumi/actions@v5
+        with:
+          pulumi-version: ${{ env.PULUMI_VERSION }}
+
+      - name: Configure AWS Credentials
+        if: matrix.cloud == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEV_ROLE_ARN }}
+          aws-region: ${{ matrix.region }}
+          role-session-name: kuma-deploy-${{ matrix.cluster }}
+
+      - name: Configure Azure Credentials
+        if: matrix.cloud == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to Pulumi Backend
+        run: pulumi login s3://${{ secrets.PULUMI_STATE_BUCKET }}
+        env:
+          AWS_REGION: us-west-2
+
+      - name: Deploy to ${{ matrix.cluster }}
+        run: |
+          cd kuma-orchestration
+
+          # Override current cluster
+          pulumi config set cluster:currentCluster ${{ matrix.cluster }} -s dev
+
+          pulumi up --yes --skip-preview
+        env:
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}

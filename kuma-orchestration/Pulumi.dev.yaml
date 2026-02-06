@@ -1,26 +1,113 @@
 config:
-  kuma-orchestration:infraStackName: organization/infra/dev
+  # ============================================================================
+  # Environment
+  # ============================================================================
   kuma-orchestration:environment: dev
+
+  # ============================================================================
+  # Single Cluster Mode (backward compatible)
+  # Uncomment infraStackName for simple single-cluster deployment
+  # ============================================================================
+  # kuma-orchestration:infraStackName: organization/infra/dev
+
+  # ============================================================================
+  # Multi-Cluster Configuration
+  # ============================================================================
+  cluster:currentCluster: eks-dev
+  cluster:clusters:
+    # Primary EKS cluster (hosts Global CP)
+    - name: eks-dev
+      type: eks
+      zoneName: eks-us-west-2
+      region: us-west-2
+      infraStackName: organization/infra/dev
+      isGlobalCpCluster: true
+      zoneIngressEnabled: true
+      zoneEgressEnabled: true
+      podCidr: "10.0.0.0/16"
+      serviceCidr: "172.20.0.0/16"
+
+    # Secondary AKS cluster
+    - name: aks-dev
+      type: aks
+      zoneName: aks-eastus
+      region: eastus
+      infraStackName: organization/aks-infra/dev
+      isGlobalCpCluster: false
+      zoneIngressEnabled: true
+      zoneEgressEnabled: true
+      podCidr: "10.244.0.0/16"
+      serviceCidr: "10.0.0.0/16"
+
+    # On-premises AKS Local cluster (Azure Arc)
+    - name: aks-local-dev
+      type: aks-local
+      zoneName: aks-onprem
+      region: onprem
+      kubeconfigSecretName: aks-local-kubeconfig
+      isGlobalCpCluster: false
+      zoneIngressEnabled: true
+      zoneEgressEnabled: true
+      cloudProviderSettings:
+        apiServerEndpoint: "https://aks-local.internal:6443"
+        internalLoadBalancer: "true"
+
+  # ============================================================================
+  # Cross-Cluster Settings
+  # ============================================================================
+  crossCluster:enabled: true
+  crossCluster:mtlsMode: strict
+  crossCluster:caBackend: builtin
+  crossCluster:certValidityDays: 365
+  crossCluster:universalServiceDiscovery: true
+  crossCluster:localityAwareLb: true
+  crossCluster:localityPriorityWeight: 100
+  crossCluster:crossZoneTrafficEnabled: true
+  crossCluster:crossZoneTrafficDefault: Allow
+  crossCluster:passthroughMode: none
+
+  # ============================================================================
+  # Kuma Core Settings
+  # ============================================================================
   kuma:version: "2.6.0"
-  kuma:mode: zone
+  kuma:mode: standalone
   kuma:namespace: kuma-system
-  kuma:zoneName: dev-zone
   kuma:meshName: default
   kuma:mtlsEnabled: true
   kuma:mtlsBackend: builtin
-  # Timeouts (seconds)
+
+  # Global Control Plane Settings
+  kuma:globalCp:
+    enabled: true
+    replicas: 1
+    kdsPort: 5685
+    kdsTlsEnabled: true
+    zoneSyncServiceType: LoadBalancer
+
+  # ============================================================================
+  # Timeouts (more lenient in dev)
+  # ============================================================================
   kuma:httpRequestTimeout: 30
   kuma:httpIdleTimeout: 120
   kuma:tcpIdleTimeout: 3600
+
+  # ============================================================================
   # Retry settings
+  # ============================================================================
   kuma:retryAttempts: 3
   kuma:retryPerTryTimeout: 10
   kuma:retryBackoffBase: 25
   kuma:retryBackoffMax: 250
-  # Rate limiting
+
+  # ============================================================================
+  # Rate limiting (lower in dev)
+  # ============================================================================
   kuma:rateLimitRps: 100
   kuma:rateLimitBurst: 200
-  # Circuit breaker
+
+  # ============================================================================
+  # Circuit breaker (lower limits in dev)
+  # ============================================================================
   kuma:circuitBreakerMaxConnections: 512
   kuma:circuitBreakerMaxPending: 512
   kuma:circuitBreakerMaxRequests: 512
@@ -29,20 +116,40 @@ config:
   kuma:outlierInterval: 10
   kuma:outlierBaseEjectionTime: 30
   kuma:outlierMaxEjectionPercent: 50
-  # Observability
+
+  # ============================================================================
+  # Observability (higher sample rate in dev)
+  # ============================================================================
   kuma:prometheusPort: 5670
   kuma:tracingBackend: jaeger
   kuma:traceSampleRate: "0.5"
   kuma:loggingFormat: json
+
+  # ============================================================================
   # Fault injection (enabled in dev)
+  # ============================================================================
   kuma:faultInjectionEnabled: true
   kuma:faultInjectionAbortPercent: "0.1"
   kuma:faultInjectionDelayPercent: "0.1"
   kuma:faultInjectionDelayMs: 100
+
+  # ============================================================================
   # Traffic permissions (permissive in dev)
+  # ============================================================================
   kuma:trafficPermissionDefault: Allow
-  # Managed services
+
+  # ============================================================================
+  # Managed services (local to this cluster)
+  # ============================================================================
   kuma:managedServices:
     - frontend
+    - backend
+    - api-gateway
+    - nginx
+
+  # ============================================================================
+  # Cross-cluster services (accessible from other clusters)
+  # ============================================================================
+  kuma:crossClusterServices:
     - backend
     - api-gateway

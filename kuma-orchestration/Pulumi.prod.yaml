@@ -1,26 +1,123 @@
 config:
-  kuma-orchestration:infraStackName: organization/infra/prod
+  # ============================================================================
+  # Environment
+  # ============================================================================
   kuma-orchestration:environment: prod
+
+  # ============================================================================
+  # Multi-Cluster Configuration
+  # ============================================================================
+  cluster:currentCluster: eks-prod
+  cluster:clusters:
+    # Primary EKS cluster (hosts Global CP) - US West
+    - name: eks-prod
+      type: eks
+      zoneName: eks-us-west-2
+      region: us-west-2
+      infraStackName: organization/infra/prod
+      isGlobalCpCluster: true
+      zoneIngressEnabled: true
+      zoneEgressEnabled: true
+      podCidr: "10.0.0.0/16"
+      serviceCidr: "172.20.0.0/16"
+
+    # Secondary EKS cluster - US East (DR)
+    - name: eks-prod-east
+      type: eks
+      zoneName: eks-us-east-1
+      region: us-east-1
+      infraStackName: organization/infra-east/prod
+      isGlobalCpCluster: false
+      zoneIngressEnabled: true
+      zoneEgressEnabled: true
+      podCidr: "10.1.0.0/16"
+      serviceCidr: "172.21.0.0/16"
+
+    # Azure AKS cluster - Europe
+    - name: aks-prod-eu
+      type: aks
+      zoneName: aks-westeurope
+      region: westeurope
+      infraStackName: organization/aks-infra/prod
+      isGlobalCpCluster: false
+      zoneIngressEnabled: true
+      zoneEgressEnabled: true
+      podCidr: "10.244.0.0/16"
+      serviceCidr: "10.0.0.0/16"
+
+    # On-premises AKS Local cluster
+    - name: aks-local-prod
+      type: aks-local
+      zoneName: aks-onprem-dc1
+      region: onprem-dc1
+      kubeconfigSecretName: aks-local-prod-kubeconfig
+      isGlobalCpCluster: false
+      zoneIngressEnabled: true
+      zoneEgressEnabled: true
+      cloudProviderSettings:
+        apiServerEndpoint: "https://aks-local-prod.internal:6443"
+        internalLoadBalancer: "true"
+        zoneIngressAddress: "10.50.0.100"
+
+  # ============================================================================
+  # Cross-Cluster Settings (Production - Strict)
+  # ============================================================================
+  crossCluster:enabled: true
+  crossCluster:mtlsMode: strict
+  crossCluster:caBackend: builtin
+  crossCluster:certValidityDays: 365
+  crossCluster:certRotationThreshold: 80
+  crossCluster:universalServiceDiscovery: true
+  crossCluster:localityAwareLb: true
+  crossCluster:localityPriorityWeight: 100
+  crossCluster:crossZoneTrafficEnabled: true
+  crossCluster:crossZoneTrafficDefault: Deny
+  crossCluster:passthroughMode: none
+
+  # ============================================================================
+  # Kuma Core Settings
+  # ============================================================================
   kuma:version: "2.6.0"
-  kuma:mode: zone
+  kuma:mode: standalone
   kuma:namespace: kuma-system
-  kuma:zoneName: prod-zone
   kuma:meshName: default
   kuma:mtlsEnabled: true
   kuma:mtlsBackend: builtin
-  # Timeouts (seconds) - stricter in prod
+
+  # Global Control Plane Settings (HA in production)
+  kuma:globalCp:
+    enabled: true
+    replicas: 3
+    kdsPort: 5685
+    kdsTlsEnabled: true
+    zoneSyncServiceType: LoadBalancer
+    externalAddress: kuma-global.example.com
+    externalPort: 5685
+
+  # ============================================================================
+  # Timeouts (stricter in prod)
+  # ============================================================================
   kuma:httpRequestTimeout: 15
   kuma:httpIdleTimeout: 60
   kuma:tcpIdleTimeout: 3600
+
+  # ============================================================================
   # Retry settings
+  # ============================================================================
   kuma:retryAttempts: 3
   kuma:retryPerTryTimeout: 5
   kuma:retryBackoffBase: 25
   kuma:retryBackoffMax: 250
-  # Rate limiting - higher limits in prod
+
+  # ============================================================================
+  # Rate limiting (higher limits in prod)
+  # ============================================================================
   kuma:rateLimitRps: 1000
   kuma:rateLimitBurst: 2000
-  # Circuit breaker - higher limits in prod
+
+  # ============================================================================
+  # Circuit breaker (higher limits in prod)
+  # ============================================================================
   kuma:circuitBreakerMaxConnections: 4096
   kuma:circuitBreakerMaxPending: 4096
   kuma:circuitBreakerMaxRequests: 4096
@@ -29,20 +126,43 @@ config:
   kuma:outlierInterval: 10
   kuma:outlierBaseEjectionTime: 30
   kuma:outlierMaxEjectionPercent: 50
-  # Observability - lower sample rate in prod
+
+  # ============================================================================
+  # Observability (lower sample rate in prod)
+  # ============================================================================
   kuma:prometheusPort: 5670
   kuma:tracingBackend: datadog
   kuma:traceSampleRate: "0.01"
   kuma:loggingFormat: json
   kuma:datadogAgentAddress: datadog-agent.datadog.svc.cluster.local:8126
+
+  # ============================================================================
   # Fault injection (disabled in prod)
+  # ============================================================================
   kuma:faultInjectionEnabled: false
+
+  # ============================================================================
   # Traffic permissions (restrictive in prod)
+  # ============================================================================
   kuma:trafficPermissionDefault: Deny
+
+  # ============================================================================
   # Managed services
+  # ============================================================================
   kuma:managedServices:
     - frontend
     - backend
     - api-gateway
     - payment-service
     - notification-service
+    - user-service
+    - order-service
+
+  # ============================================================================
+  # Cross-cluster services (accessible from other clusters)
+  # ============================================================================
+  kuma:crossClusterServices:
+    - backend
+    - api-gateway
+    - user-service
+    - order-service
