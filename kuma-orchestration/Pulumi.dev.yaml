@@ -1,0 +1,48 @@
+config:
+  kuma-orchestration:infraStackName: organization/infra/dev
+  kuma-orchestration:environment: dev
+  kuma:version: "2.6.0"
+  kuma:mode: zone
+  kuma:namespace: kuma-system
+  kuma:zoneName: dev-zone
+  kuma:meshName: default
+  kuma:mtlsEnabled: true
+  kuma:mtlsBackend: builtin
+  # Timeouts (seconds)
+  kuma:httpRequestTimeout: 30
+  kuma:httpIdleTimeout: 120
+  kuma:tcpIdleTimeout: 3600
+  # Retry settings
+  kuma:retryAttempts: 3
+  kuma:retryPerTryTimeout: 10
+  kuma:retryBackoffBase: 25
+  kuma:retryBackoffMax: 250
+  # Rate limiting
+  kuma:rateLimitRps: 100
+  kuma:rateLimitBurst: 200
+  # Circuit breaker
+  kuma:circuitBreakerMaxConnections: 512
+  kuma:circuitBreakerMaxPending: 512
+  kuma:circuitBreakerMaxRequests: 512
+  kuma:circuitBreakerMaxRetries: 3
+  kuma:outlierConsecutiveErrors: 5
+  kuma:outlierInterval: 10
+  kuma:outlierBaseEjectionTime: 30
+  kuma:outlierMaxEjectionPercent: 50
+  # Observability
+  kuma:prometheusPort: 5670
+  kuma:tracingBackend: jaeger
+  kuma:traceSampleRate: "0.5"
+  kuma:loggingFormat: json
+  # Fault injection (enabled in dev)
+  kuma:faultInjectionEnabled: true
+  kuma:faultInjectionAbortPercent: "0.1"
+  kuma:faultInjectionDelayPercent: "0.1"
+  kuma:faultInjectionDelayMs: 100
+  # Traffic permissions (permissive in dev)
+  kuma:trafficPermissionDefault: Allow
+  # Managed services
+  kuma:managedServices:
+    - frontend
+    - backend
+    - api-gateway

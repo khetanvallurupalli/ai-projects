@@ -1,0 +1,48 @@
+config:
+  kuma-orchestration:infraStackName: organization/infra/prod
+  kuma-orchestration:environment: prod
+  kuma:version: "2.6.0"
+  kuma:mode: zone
+  kuma:namespace: kuma-system
+  kuma:zoneName: prod-zone
+  kuma:meshName: default
+  kuma:mtlsEnabled: true
+  kuma:mtlsBackend: builtin
+  # Timeouts (seconds) - stricter in prod
+  kuma:httpRequestTimeout: 15
+  kuma:httpIdleTimeout: 60
+  kuma:tcpIdleTimeout: 3600
+  # Retry settings
+  kuma:retryAttempts: 3
+  kuma:retryPerTryTimeout: 5
+  kuma:retryBackoffBase: 25
+  kuma:retryBackoffMax: 250
+  # Rate limiting - higher limits in prod
+  kuma:rateLimitRps: 1000
+  kuma:rateLimitBurst: 2000
+  # Circuit breaker - higher limits in prod
+  kuma:circuitBreakerMaxConnections: 4096
+  kuma:circuitBreakerMaxPending: 4096
+  kuma:circuitBreakerMaxRequests: 4096
+  kuma:circuitBreakerMaxRetries: 3
+  kuma:outlierConsecutiveErrors: 5
+  kuma:outlierInterval: 10
+  kuma:outlierBaseEjectionTime: 30
+  kuma:outlierMaxEjectionPercent: 50
+  # Observability - lower sample rate in prod
+  kuma:prometheusPort: 5670
+  kuma:tracingBackend: datadog
+  kuma:traceSampleRate: "0.01"
+  kuma:loggingFormat: json
+  kuma:datadogAgentAddress: datadog-agent.datadog.svc.cluster.local:8126
+  # Fault injection (disabled in prod)
+  kuma:faultInjectionEnabled: false
+  # Traffic permissions (restrictive in prod)
+  kuma:trafficPermissionDefault: Deny
+  # Managed services
+  kuma:managedServices:
+    - frontend
+    - backend
+    - api-gateway
+    - payment-service
+    - notification-service

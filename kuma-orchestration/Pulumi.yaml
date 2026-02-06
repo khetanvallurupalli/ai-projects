@@ -1,0 +1,6 @@
+name: kuma-orchestration
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: Kuma service mesh policies and multi-zone federation for EKS clusters
