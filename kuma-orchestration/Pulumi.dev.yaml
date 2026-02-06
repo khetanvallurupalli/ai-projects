@@ -148,8 +148,16 @@ config:
     - nginx
 
   # ============================================================================
-  # Cross-cluster services (accessible from other clusters)
+  # Cross-cluster namespace access (accessible from other clusters)
+  # Each entry specifies a namespace. If 'services' is provided, only those
+  # services are accessible cross-cluster. If omitted, all services in the
+  # namespace are accessible.
   # ============================================================================
-  kuma:crossClusterServices:
-    - backend
-    - api-gateway
+  kuma:crossClusterNamespaces:
+    # Only specific services in the backend namespace
+    - namespace: backend-ns
+      services:
+        - backend
+        - api-gateway
+    # All services in the shared namespace are accessible cross-cluster
+    - namespace: shared-services

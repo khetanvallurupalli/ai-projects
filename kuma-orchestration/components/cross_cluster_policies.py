@@ -58,42 +58,85 @@ class CrossClusterPolicies(ComponentResource):
             opts=child_opts,
         )
 
-        # Create cross-cluster service policies for each cross-cluster service
+        # Create cross-cluster service policies per namespace configuration
         self.cross_cluster_permissions: List[k8s.apiextensions.CustomResource] = []
-        for service in config.cross_cluster_services:
-            permission = k8s.apiextensions.CustomResource(
-                f"{name}-cross-cluster-permission-{service}",
-                api_version="kuma.io/v1alpha1",
-                kind="MeshTrafficPermission",
-                metadata=k8s.meta.v1.ObjectMetaArgs(
-                    name=f"{service}-cross-cluster-permission",
-                    namespace=config.kuma_namespace,
-                    labels={
-                        "kuma.io/mesh": config.mesh_name,
-                        "kuma.io/origin": "zone",
-                        "kuma.io/policy-type": "cross-cluster",
-                        "app": service,
+        for ns_config in config.get_cross_cluster_namespaces():
+            ns = ns_config.namespace
+            if ns_config.all_services:
+                # Allow all services in this namespace across clusters
+                permission = k8s.apiextensions.CustomResource(
+                    f"{name}-cross-cluster-ns-{ns}",
+                    api_version="kuma.io/v1alpha1",
+                    kind="MeshTrafficPermission",
+                    metadata=k8s.meta.v1.ObjectMetaArgs(
+                        name=f"{ns}-namespace-cross-cluster-permission",
+                        namespace=config.kuma_namespace,
+                        labels={
+                            "kuma.io/mesh": config.mesh_name,
+                            "kuma.io/origin": "zone",
+                            "kuma.io/policy-type": "cross-cluster",
+                            "cross-cluster-namespace": ns,
+                        },
+                    ),
+                    spec={
+                        "targetRef": {
+                            "kind": "MeshSubset",
+                            "tags": {
+                                "k8s.kuma.io/namespace": ns,
+                            },
+                        },
+                        "from": [
+                            {
+                                "targetRef": {
+                                    "kind": "Mesh",
+                                },
+                                "default": {
+                                    "action": "Allow",
+                                },
+                            }
+                        ],
                     },
-                ),
-                spec={
-                    "targetRef": {
-                        "kind": "MeshService",
-                        "name": service,
-                    },
-                    "from": [
-                        {
+                    opts=child_opts,
+                )
+                self.cross_cluster_permissions.append(permission)
+            else:
+                # Allow only specific services in this namespace
+                for service in ns_config.services:
+                    permission = k8s.apiextensions.CustomResource(
+                        f"{name}-cross-cluster-permission-{ns}-{service}",
+                        api_version="kuma.io/v1alpha1",
+                        kind="MeshTrafficPermission",
+                        metadata=k8s.meta.v1.ObjectMetaArgs(
+                            name=f"{service}-{ns}-cross-cluster-permission",
+                            namespace=config.kuma_namespace,
+                            labels={
+                                "kuma.io/mesh": config.mesh_name,
+                                "kuma.io/origin": "zone",
+                                "kuma.io/policy-type": "cross-cluster",
+                                "app": service,
+                                "cross-cluster-namespace": ns,
+                            },
+                        ),
+                        spec={
                             "targetRef": {
-                                "kind": "Mesh",
+                                "kind": "MeshService",
+                                "name": service,
+                                "namespace": ns,
                             },
-                            "default": {
-                                "action": "Allow",
-                            },
-                        }
-                    ],
-                },
-                opts=child_opts,
-            )
-            self.cross_cluster_permissions.append(permission)
+                            "from": [
+                                {
+                                    "targetRef": {
+                                        "kind": "Mesh",
+                                    },
+                                    "default": {
+                                        "action": "Allow",
+                                    },
+                                }
+                            ],
+                        },
+                        opts=child_opts,
+                    )
+                    self.cross_cluster_permissions.append(permission)
 
         # Create locality-aware load balancing policy if enabled
         self.locality_lb_policy = None
@@ -184,51 +227,104 @@ class CrossClusterPolicies(ComponentResource):
 
         # Create MeshHealthCheck for cross-cluster services
         self.cross_cluster_health_checks: List[k8s.apiextensions.CustomResource] = []
-        for service in config.cross_cluster_services:
-            health_check = k8s.apiextensions.CustomResource(
-                f"{name}-health-check-{service}",
-                api_version="kuma.io/v1alpha1",
-                kind="MeshHealthCheck",
-                metadata=k8s.meta.v1.ObjectMetaArgs(
-                    name=f"{service}-cross-cluster-health-check",
-                    namespace=config.kuma_namespace,
-                    labels={
-                        "kuma.io/mesh": config.mesh_name,
-                        "kuma.io/origin": "zone",
-                        "app": service,
+        for ns_config in config.get_cross_cluster_namespaces():
+            ns = ns_config.namespace
+            if ns_config.all_services:
+                # Health check for all services in the namespace
+                health_check = k8s.apiextensions.CustomResource(
+                    f"{name}-health-check-ns-{ns}",
+                    api_version="kuma.io/v1alpha1",
+                    kind="MeshHealthCheck",
+                    metadata=k8s.meta.v1.ObjectMetaArgs(
+                        name=f"{ns}-namespace-cross-cluster-health-check",
+                        namespace=config.kuma_namespace,
+                        labels={
+                            "kuma.io/mesh": config.mesh_name,
+                            "kuma.io/origin": "zone",
+                            "cross-cluster-namespace": ns,
+                        },
+                    ),
+                    spec={
+                        "targetRef": {
+                            "kind": "MeshSubset",
+                            "tags": {
+                                "k8s.kuma.io/namespace": ns,
+                            },
+                        },
+                        "to": [
+                            {
+                                "targetRef": {
+                                    "kind": "MeshSubset",
+                                    "tags": {
+                                        "k8s.kuma.io/namespace": ns,
+                                    },
+                                },
+                                "default": {
+                                    "interval": "10s",
+                                    "timeout": "5s",
+                                    "unhealthyThreshold": 3,
+                                    "healthyThreshold": 2,
+                                    "http": {
+                                        "path": "/health",
+                                        "expectedStatuses": [200, 204],
+                                    },
+                                },
+                            }
+                        ],
                     },
-                ),
-                spec={
-                    "targetRef": {
-                        "kind": "MeshService",
-                        "name": service,
-                    },
-                    "to": [
-                        {
+                    opts=child_opts,
+                )
+                self.cross_cluster_health_checks.append(health_check)
+            else:
+                # Health check per service in the namespace
+                for service in ns_config.services:
+                    health_check = k8s.apiextensions.CustomResource(
+                        f"{name}-health-check-{ns}-{service}",
+                        api_version="kuma.io/v1alpha1",
+                        kind="MeshHealthCheck",
+                        metadata=k8s.meta.v1.ObjectMetaArgs(
+                            name=f"{service}-{ns}-cross-cluster-health-check",
+                            namespace=config.kuma_namespace,
+                            labels={
+                                "kuma.io/mesh": config.mesh_name,
+                                "kuma.io/origin": "zone",
+                                "app": service,
+                                "cross-cluster-namespace": ns,
+                            },
+                        ),
+                        spec={
                             "targetRef": {
                                 "kind": "MeshService",
                                 "name": service,
+                                "namespace": ns,
                             },
-                            "default": {
-                                "interval": "10s",
-                                "timeout": "5s",
-                                "unhealthyThreshold": 3,
-                                "healthyThreshold": 2,
-                                "http": {
-                                    "path": "/health",
-                                    "expectedStatuses": [200, 204],
-                                },
-                            },
-                        }
-                    ],
-                },
-                opts=child_opts,
-            )
-            self.cross_cluster_health_checks.append(health_check)
+                            "to": [
+                                {
+                                    "targetRef": {
+                                        "kind": "MeshService",
+                                        "name": service,
+                                        "namespace": ns,
+                                    },
+                                    "default": {
+                                        "interval": "10s",
+                                        "timeout": "5s",
+                                        "unhealthyThreshold": 3,
+                                        "healthyThreshold": 2,
+                                        "http": {
+                                            "path": "/health",
+                                            "expectedStatuses": [200, 204],
+                                        },
+                                    },
+                                }
+                            ],
+                        },
+                        opts=child_opts,
+                    )
+                    self.cross_cluster_health_checks.append(health_check)
 
         self.register_outputs({
             "enabled": True,
-            "cross_cluster_service_count": len(config.cross_cluster_services),
+            "cross_cluster_namespace_count": len(config.cross_cluster_namespaces),
             "locality_lb_enabled": config.cross_cluster.locality_aware_lb_enabled,
             "passthrough_mode": config.cross_cluster.passthrough_mode,
         })

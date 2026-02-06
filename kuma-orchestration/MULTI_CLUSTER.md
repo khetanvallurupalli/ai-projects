@@ -170,15 +170,25 @@ kubectl get zones -n kuma-system
 
 ### Enable Cross-Cluster Service
 
-1. Add service to `crossClusterServices` in config:
+Cross-cluster access is configured at the **namespace level**, with optional service-name granularity.
+
+1. Add namespace entries to `crossClusterNamespaces` in config:
 
 ```yaml
-kuma:crossClusterServices:
-  - backend
-  - api-gateway
-  - user-service
-  - my-new-service  # Add here
+kuma:crossClusterNamespaces:
+  # Option A: Only specific services in a namespace are accessible cross-cluster
+  - namespace: backend-ns
+    services:
+      - backend
+      - api-gateway
+
+  # Option B: ALL services in a namespace are accessible cross-cluster
+  # (omit the 'services' field)
+  - namespace: shared-services
 ```
+
+- **With `services`**: Only the listed services in that namespace get cross-cluster MeshTrafficPermission and health checks (targeted by `MeshService` with name + namespace).
+- **Without `services`**: All services in the namespace are accessible cross-cluster (targeted by `MeshSubset` with `k8s.kuma.io/namespace` tag).
 
 2. Deploy the service with sidecar injection:
 
@@ -187,7 +197,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: my-new-service
-  namespace: app
+  namespace: backend-ns  # Must match the namespace in crossClusterNamespaces
 spec:
   template:
     metadata:
@@ -211,7 +221,7 @@ Services are automatically discoverable across zones:
 
 ```bash
 # From any cluster in the mesh
-curl http://my-new-service.app.svc.cluster.local
+curl http://my-new-service.backend-ns.svc.cluster.local
 
 # The sidecar routes to:
 # 1. Local zone (if service exists locally) - preferred
@@ -389,7 +399,7 @@ kubectl get dataplanes -n kuma-system -o wide
 kumactl get dataplanes --mesh default | grep service-name
 ```
 
-2. Check service is in crossClusterServices list
+2. Check service's namespace is in `crossClusterNamespaces` (and service name if specific services are listed)
 3. Verify MeshTrafficPermission allows access
 
 ### Certificate Issues

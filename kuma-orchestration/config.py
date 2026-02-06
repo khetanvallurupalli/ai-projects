@@ -27,6 +27,22 @@ class KumaMode(Enum):
 
 
 @dataclass
+class CrossClusterNamespaceConfig:
+    """Configuration for cross-cluster access at the namespace level.
+
+    If services is empty, all services in the namespace are accessible cross-cluster.
+    If services is specified, only those services are accessible.
+    """
+    namespace: str
+    services: List[str] = field(default_factory=list)
+
+    @property
+    def all_services(self) -> bool:
+        """True if all services in the namespace are accessible cross-cluster."""
+        return len(self.services) == 0
+
+
+@dataclass
 class ClusterConfig:
     """Configuration for a single Kubernetes cluster."""
     name: str
@@ -154,9 +170,9 @@ class KumaConfig:
     # ===== Managed Services =====
     managed_services: List[str] = field(default_factory=list)
 
-    # ===== Cross-Cluster Services =====
-    # Services that should be accessible across clusters
-    cross_cluster_services: List[str] = field(default_factory=list)
+    # ===== Cross-Cluster Namespace Configuration =====
+    # Namespaces (with optional service names) that should be accessible across clusters
+    cross_cluster_namespaces: List[CrossClusterNamespaceConfig] = field(default_factory=list)
 
     # ===== Environment =====
     environment: str = "dev"
@@ -179,6 +195,10 @@ class KumaConfig:
         """Get all zone clusters (non-global CP clusters)."""
         return [c for c in self.clusters if not c.is_global_cp_cluster]
 
+    def get_cross_cluster_namespaces(self) -> List[CrossClusterNamespaceConfig]:
+        """Get all namespace configs that have cross-cluster access."""
+        return self.cross_cluster_namespaces
+
     def is_multi_cluster(self) -> bool:
         """Check if this is a multi-cluster deployment."""
         return len(self.clusters) > 1 and self.cross_cluster.enabled
@@ -200,6 +220,23 @@ def _parse_cluster_config(cluster_dict: Dict) -> ClusterConfig:
         service_cidr=cluster_dict.get("serviceCidr"),
         cloud_provider_settings=cluster_dict.get("cloudProviderSettings", {}),
     )
+
+
+def _parse_cross_cluster_namespaces(ns_list: list) -> List[CrossClusterNamespaceConfig]:
+    """Parse cross-cluster namespace configuration.
+
+    Supports two formats:
+      - Object format: [{namespace: "app-ns", services: ["svc-a", "svc-b"]}, ...]
+      - Object with no services (all services): [{namespace: "app-ns"}, ...]
+    """
+    result = []
+    for item in ns_list:
+        if isinstance(item, dict):
+            result.append(CrossClusterNamespaceConfig(
+                namespace=item.get("namespace", "default"),
+                services=item.get("services", []),
+            ))
+    return result
 
 
 def load_config() -> KumaConfig:
@@ -330,8 +367,10 @@ def load_config() -> KumaConfig:
                                                    "Allow" if environment == "dev" else "Deny"),
         # Managed services
         managed_services=kuma_config.get_object("managedServices") or [],
-        # Cross-cluster services
-        cross_cluster_services=kuma_config.get_object("crossClusterServices") or [],
+        # Cross-cluster namespace configuration
+        cross_cluster_namespaces=_parse_cross_cluster_namespaces(
+            kuma_config.get_object("crossClusterNamespaces") or []
+        ),
         # Environment
         environment=environment,
     )

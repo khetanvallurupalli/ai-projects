@@ -159,10 +159,21 @@ config:
     - order-service
 
   # ============================================================================
-  # Cross-cluster services (accessible from other clusters)
+  # Cross-cluster namespace access (accessible from other clusters)
+  # Each entry specifies a namespace. If 'services' is provided, only those
+  # services are accessible cross-cluster. If omitted, all services in the
+  # namespace are accessible.
   # ============================================================================
-  kuma:crossClusterServices:
-    - backend
-    - api-gateway
-    - user-service
-    - order-service
+  kuma:crossClusterNamespaces:
+    # Only specific services in the backend namespace
+    - namespace: backend-ns
+      services:
+        - backend
+        - api-gateway
+    # Only specific services in the user/order namespace
+    - namespace: platform-ns
+      services:
+        - user-service
+        - order-service
+    # All services in shared-services namespace are accessible
+    - namespace: shared-services

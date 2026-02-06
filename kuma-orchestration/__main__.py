@@ -230,7 +230,10 @@ pulumi.export("kuma_mode", config.mode.value)
 # Multi-cluster specific exports
 pulumi.export("is_multi_cluster", is_multi_cluster)
 pulumi.export("cross_cluster_enabled", config.cross_cluster.enabled if is_multi_cluster else False)
-pulumi.export("cross_cluster_services", config.cross_cluster_services)
+pulumi.export("cross_cluster_namespaces", [
+    {"namespace": ns.namespace, "services": ns.services, "all_services": ns.all_services}
+    for ns in config.cross_cluster_namespaces
+])
 
 if global_address:
     pulumi.export("global_cp_address", global_address)

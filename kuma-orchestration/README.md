@@ -6,6 +6,7 @@ Production-ready Pulumi (Python) project for deploying Kuma service mesh with mu
 
 - **Multi-Cluster Support**: EKS, AKS, AKS Local (on-premises), GKE, K3s, KIND
 - **Cross-Cluster mTLS**: Automatic certificate management with rotation
+- **Namespace-Level Cross-Cluster Access**: Enable multi-cluster access per namespace, with optional service-name granularity
 - **Locality-Aware Load Balancing**: Prefer local zone, failover to remote
 - **Complete Policy Suite**: Traffic routing, permissions, rate limiting, circuit breaker, resilience
 - **Observability Stack**: Prometheus + Jaeger/Datadog integration
@@ -141,6 +142,30 @@ kuma-orchestration/
 | `crossCluster:localityAwareLb` | bool | true | Prefer local zone |
 | `crossCluster:crossZoneTrafficDefault` | string | Allow | Default cross-zone action |
 
+### Cross-Cluster Namespace Access
+
+Configure which namespaces (and optionally which services) are accessible across clusters:
+
+```yaml
+kuma:crossClusterNamespaces:
+  # Only specific services in this namespace are accessible cross-cluster
+  - namespace: backend-ns
+    services:
+      - backend
+      - api-gateway
+
+  # ALL services in this namespace are accessible cross-cluster
+  - namespace: shared-services
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `namespace` | string | yes | Kubernetes namespace to enable cross-cluster access for |
+| `services` | list | no | Specific service names to expose. If omitted, all services in the namespace are accessible |
+
+- **With `services`**: Policies target each service by `MeshService` (name + namespace) for fine-grained control.
+- **Without `services`**: Policies target the entire namespace via `MeshSubset` (`k8s.kuma.io/namespace` tag).
+
 ### Policy Configuration
 
 | Key | Type | Default | Description |
@@ -190,11 +215,14 @@ kubectl get zones -n kuma-system
 # Check policies
 kubectl get meshtrafficpermission,meshratelimit,meshcircuitbreaker -n kuma-system
 
-# Check cross-cluster services
-kubectl get dataplanes -n kuma-system -o wide
+# Check cross-cluster namespace policies
+kubectl get meshtrafficpermission -n kuma-system -l kuma.io/policy-type=cross-cluster
 
-# Test cross-cluster call
-kubectl exec -n app deployment/client -- curl http://backend.app.svc.cluster.local
+# Check cross-cluster health checks
+kubectl get meshhealthcheck -n kuma-system -l cross-cluster-namespace
+
+# Test cross-cluster call (service in backend-ns namespace)
+kubectl exec -n app deployment/client -- curl http://backend.backend-ns.svc.cluster.local
 ```
 
 ## Troubleshooting
