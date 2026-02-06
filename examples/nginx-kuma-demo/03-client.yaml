@@ -1,0 +1,53 @@
+---
+# Curl client deployment for testing service mesh communication
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: curl-client
+  namespace: nginx-demo
+  labels:
+    app: curl-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: curl-client
+  template:
+    metadata:
+      labels:
+        app: curl-client
+      annotations:
+        kuma.io/sidecar-proxy-memory: "64Mi"
+        kuma.io/sidecar-proxy-cpu: "50m"
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:8.5.0
+          command:
+            - sleep
+            - "infinity"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+# Service for curl-client (needed for Kuma to identify it)
+apiVersion: v1
+kind: Service
+metadata:
+  name: curl-client
+  namespace: nginx-demo
+  labels:
+    app: curl-client
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 80
+      protocol: TCP
+      name: http
+  selector:
+    app: curl-client

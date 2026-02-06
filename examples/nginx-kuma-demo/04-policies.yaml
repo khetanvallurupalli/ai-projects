@@ -1,0 +1,238 @@
+---
+# MeshTrafficPermission - Allow curl-client to access nginx
+apiVersion: kuma.io/v1alpha1
+kind: MeshTrafficPermission
+metadata:
+  name: nginx-traffic-permission
+  namespace: kuma-system
+  labels:
+    kuma.io/mesh: default
+spec:
+  targetRef:
+    kind: MeshService
+    name: nginx_nginx-demo_svc_80
+  from:
+    - targetRef:
+        kind: MeshSubset
+        tags:
+          app: curl-client
+      default:
+        action: Allow
+    - targetRef:
+        kind: MeshSubset
+        tags:
+          app: nginx
+      default:
+        action: Allow
+---
+# MeshRateLimit - Limit requests to nginx
+apiVersion: kuma.io/v1alpha1
+kind: MeshRateLimit
+metadata:
+  name: nginx-rate-limit
+  namespace: kuma-system
+  labels:
+    kuma.io/mesh: default
+spec:
+  targetRef:
+    kind: MeshService
+    name: nginx_nginx-demo_svc_80
+  from:
+    - targetRef:
+        kind: Mesh
+      default:
+        local:
+          http:
+            requestRate:
+              num: 100
+              interval: 1s
+            onRateLimit:
+              status: 429
+              headers:
+                add:
+                  - name: x-rate-limited
+                    value: "true"
+                  - name: x-rate-limit-limit
+                    value: "100"
+---
+# MeshCircuitBreaker - Protect nginx from overload
+apiVersion: kuma.io/v1alpha1
+kind: MeshCircuitBreaker
+metadata:
+  name: nginx-circuit-breaker
+  namespace: kuma-system
+  labels:
+    kuma.io/mesh: default
+spec:
+  targetRef:
+    kind: MeshService
+    name: nginx_nginx-demo_svc_80
+  to:
+    - targetRef:
+        kind: MeshService
+        name: nginx_nginx-demo_svc_80
+      default:
+        connectionLimits:
+          maxConnections: 512
+          maxPendingRequests: 512
+          maxRequests: 512
+          maxRetries: 3
+        outlierDetection:
+          disabled: false
+          interval: 10s
+          baseEjectionTime: 30s
+          maxEjectionPercent: 50
+          splitExternalAndLocalErrors: true
+          detectors:
+            totalFailures:
+              consecutive: 5
+            gatewayFailures:
+              consecutive: 5
+            localOriginFailures:
+              consecutive: 5
+---
+# MeshTimeout - Set request timeouts for nginx
+apiVersion: kuma.io/v2alpha1
+kind: MeshTimeout
+metadata:
+  name: nginx-timeout
+  namespace: kuma-system
+  labels:
+    kuma.io/mesh: default
+spec:
+  targetRef:
+    kind: MeshService
+    name: nginx_nginx-demo_svc_80
+  to:
+    - targetRef:
+        kind: MeshService
+        name: nginx_nginx-demo_svc_80
+      default:
+        http:
+          requestTimeout: 15s
+          idleTimeout: 60s
+          streamIdleTimeout: 300s
+        tcp:
+          idleTimeout: 3600s
+          connectTimeout: 5s
+---
+# MeshRetry - Retry failed requests to nginx
+apiVersion: kuma.io/v2alpha1
+kind: MeshRetry
+metadata:
+  name: nginx-retry
+  namespace: kuma-system
+  labels:
+    kuma.io/mesh: default
+spec:
+  targetRef:
+    kind: MeshService
+    name: nginx_nginx-demo_svc_80
+  to:
+    - targetRef:
+        kind: MeshService
+        name: nginx_nginx-demo_svc_80
+      default:
+        http:
+          numRetries: 3
+          perTryTimeout: 5s
+          backOff:
+            baseInterval: 25ms
+            maxInterval: 250ms
+          retryOn:
+            - 5xx
+            - reset
+            - connect-failure
+            - retriable-4xx
+            - refused-stream
+            - gateway-error
+        tcp:
+          maxConnectAttempt: 3
+---
+# MeshHTTPRoute - HTTP routing for nginx
+apiVersion: kuma.io/v2alpha1
+kind: MeshHTTPRoute
+metadata:
+  name: nginx-http-route
+  namespace: kuma-system
+  labels:
+    kuma.io/mesh: default
+spec:
+  targetRef:
+    kind: MeshService
+    name: nginx_nginx-demo_svc_80
+  to:
+    - targetRef:
+        kind: MeshService
+        name: nginx_nginx-demo_svc_80
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /api
+          default:
+            backendRefs:
+              - kind: MeshService
+                name: nginx_nginx-demo_svc_80
+                weight: 100
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /
+          default:
+            backendRefs:
+              - kind: MeshService
+                name: nginx_nginx-demo_svc_80
+                weight: 100
+---
+# MeshAccessLog - Enable access logging for nginx
+apiVersion: kuma.io/v1alpha1
+kind: MeshAccessLog
+metadata:
+  name: nginx-access-log
+  namespace: kuma-system
+  labels:
+    kuma.io/mesh: default
+spec:
+  targetRef:
+    kind: MeshService
+    name: nginx_nginx-demo_svc_80
+  to:
+    - targetRef:
+        kind: Mesh
+      default:
+        backends:
+          - type: File
+            file:
+              path: /dev/stdout
+              format:
+                type: Json
+                json:
+                  - key: start_time
+                    value: "%START_TIME%"
+                  - key: method
+                    value: "%REQ(:METHOD)%"
+                  - key: path
+                    value: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+                  - key: protocol
+                    value: "%PROTOCOL%"
+                  - key: response_code
+                    value: "%RESPONSE_CODE%"
+                  - key: response_flags
+                    value: "%RESPONSE_FLAGS%"
+                  - key: bytes_received
+                    value: "%BYTES_RECEIVED%"
+                  - key: bytes_sent
+                    value: "%BYTES_SENT%"
+                  - key: duration_ms
+                    value: "%DURATION%"
+                  - key: upstream_service
+                    value: "%UPSTREAM_CLUSTER%"
+                  - key: upstream_host
+                    value: "%UPSTREAM_HOST%"
+                  - key: request_id
+                    value: "%REQ(X-REQUEST-ID)%"
+                  - key: source_service
+                    value: "%KUMA_SOURCE_SERVICE%"
+                  - key: destination_service
+                    value: "%KUMA_DESTINATION_SERVICE%"

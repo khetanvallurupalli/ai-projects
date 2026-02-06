@@ -1,0 +1,10 @@
+---
+# Namespace with Kuma sidecar injection enabled
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nginx-demo
+  labels:
+    kuma.io/sidecar-injection: enabled
+  annotations:
+    kuma.io/mesh: default
